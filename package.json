@@ -1,0 +1,29 @@
+{
+  "name": "wedplan-server",
+  "version": "1.0.0",
+  "description": "Express + MongoDB API for the WedPlan wedding-planning platform — JWT auth, role-based access, service moderation, bookings, Stripe premium, ImgBB uploads.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "seed": "node scripts/seed.js",
+    "test": "node scripts/smoke-test.mjs"
+  },
+  "keywords": [
+    "wedding",
+    "express",
+    "mongodb",
+    "stripe",
+    "better-auth"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@better-auth/utils": "^0.5.1",
+    "dotenv": "^18.0.10",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.9.1",
+    "stripe": "^23.2.0"
+  }
+}
