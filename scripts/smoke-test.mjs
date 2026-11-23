@@ -94,7 +94,11 @@ async function main() {
     list.status === 200 && list.body.services.every((s) => s.isApproved && s.isActive),
     `(got ${list.body?.services?.length})`,
   );
-  check("public list returns 6 approved", list.body?.services?.length === 6);
+  check(
+    "public list returns approved services",
+    list.body?.services?.length >= 6,
+    `(got ${list.body?.services?.length})`,
+  );
 
   const search = await api(null, "/api/services?search=willow");
   check("search by name", search.body?.services?.some((s) => s.name.includes("Willow")));
@@ -102,8 +106,8 @@ async function main() {
   const byCat = await api(null, "/api/services?category=Catering%20Services");
   check(
     "category filter",
-    byCat.body?.services?.length === 1 &&
-      byCat.body.services[0].category === "Catering Services",
+    byCat.body?.services?.length > 0 &&
+      byCat.body.services.every((s) => s.category === "Catering Services"),
   );
 
   const byLoc = await api(null, "/api/services?location=portland");
@@ -180,7 +184,10 @@ async function main() {
 
   console.log("\n4. Booking rules");
   await resetTestBookings();
-  const bookable = (asc.body.services.find((s) => s.category === "Wedding Venues") || asc.body.services[0]);
+  // Use the vendor-owned Willow listing so the same booking can later be
+  // accepted by vendorToken; catalogue seeds may add other venues.
+  const willow = await api(null, "/api/services?search=willow");
+  const bookable = willow.body.services[0];
   const eventDate = TEST_EVENT_DATE;
 
   const selfBook = await api(customerToken, "/api/bookings", {
@@ -195,11 +202,9 @@ async function main() {
   });
   check("duplicate booking → 409", dupBook.status === 409);
 
-  const ownService = await api(null, "/api/services?search=willow");
-  const willowId = ownService.body.services[0]._id;
   const vendorSelfBook = await api(vendorToken, "/api/bookings", {
     method: "POST",
-    body: JSON.stringify({ serviceId: willowId, eventDate }),
+    body: JSON.stringify({ serviceId: bookable._id, eventDate }),
   });
   check("vendor cannot book own service → 400", vendorSelfBook.status === 400);
 
