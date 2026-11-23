@@ -23,16 +23,21 @@ serves the separate Next.js client (`wedplan-client`).
   service + event date, and only `pending` requests can be accepted, rejected,
   or cancelled (each by the right party).
 - **Admin** — user management (block/unblock, role changes short of admin),
-  service moderation (approve/reject), stats, and a **view-only** transactions
-  ledger.
+  service moderation (approve/reject), stats, and a transaction ledger with
+  UPI verification.
 - **Stripe premium** — `POST /api/payments/checkout` creates a Checkout session;
   the **raw-body webhook** (`/api/payments/webhook`, signature-verified) is the
-  only thing that activates premium (30 days) and writes the transaction. The
-  client success redirect never trusts itself.
+  trusted event that activates premium (30 days) and writes the transaction.
+  The client success redirect never trusts itself.
+- **UPI premium** — `POST /api/payments/upi/create` returns a QR/deep link and
+  pending reference; `POST /api/payments/upi/submit` records the vendor's UTR.
+  Premium activates only through the admin-only
+  `PATCH /api/admin/transactions/:ref/verify`; polling and redirects never
+  change the plan.
 - **ImgBB uploads** — `POST /api/profile/image` for profile pictures.
 - **Graceful degradation** — with `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-  or `IMGBB_API_KEY` missing, the related endpoints return a clear `503`
-  explaining which env var to set instead of crashing.
+  `UPI_VPA`, or `IMGBB_API_KEY` missing, the related endpoints return a clear
+  `503` explaining which env var to set instead of crashing.
 
 ## Tech stack
 
@@ -66,12 +71,16 @@ serves the separate Next.js client (`wedplan-client`).
 | POST | `/api/profile/image` | authenticated | ImgBB upload |
 | POST | `/api/payments/checkout` | authenticated | Stripe Checkout session |
 | GET | `/api/payments/status` | authenticated | verify a session with Stripe |
-| POST | `/api/payments/webhook` | Stripe signature | **only** path that activates premium |
+| POST | `/api/payments/webhook` | Stripe signature | verified Stripe event that activates premium |
+| POST | `/api/payments/upi/create` | vendor | create a pending UPI order + QR/deep link |
+| POST | `/api/payments/upi/submit` | vendor | record the UTR (status becomes `verifying`) |
+| GET | `/api/payments/upi/status` | authenticated | poll a UPI order (never activates) |
 | GET | `/api/admin/stats` | admin | dashboard counters |
 | GET/PATCH | `/api/admin/users[/:id]` | admin | list · block/unblock · role (never admin) |
 | GET | `/api/admin/services` | admin | every listing incl. unapproved |
 | PATCH | `/api/admin/services/:id` | admin | `approve` / `reject` |
-| GET | `/api/admin/transactions` | admin | view-only ledger |
+| GET | `/api/admin/transactions` | admin | full ledger |
+| PATCH | `/api/admin/transactions/:ref/verify` | admin | `approve` / `reject` a UPI payment — the trusted activation event |
 
 All error responses are `{ "error": "<message>" }` with proper `401`/`403`/`404`/
 `409`/`503` status codes.
@@ -104,6 +113,9 @@ Fill in `.env` (never commit it — it is git-ignored):
 | `JWT_EXPIRES_IN` | — | API token lifetime, default `1h` |
 | `STRIPE_SECRET_KEY` | for payments | Stripe secret key (test mode ok) |
 | `STRIPE_WEBHOOK_SECRET` | for payments | webhook signing secret (raw-body verification) |
+| `UPI_VPA` | for UPI | payee UPI ID shown on the QR/deep link; empty disables UPI |
+| `UPI_PAYEE_NAME` | — | display name on the payment link, default `WedPlan` |
+| `UPI_MONTHLY_PAISE` | — | 30-day premium price in paise, default `49900` (₹499) |
 | `IMGBB_API_KEY` | for uploads | ImgBB API key |
 
 ### 3. Seed demo data (optional)
