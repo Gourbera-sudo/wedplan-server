@@ -23,4 +23,9 @@ export const env = {
   stripeSecretKey: process.env.STRIPE_SECRET_KEY || "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
   imgbbApiKey: process.env.IMGBB_API_KEY || "",
+  /** UPI subscription: payee VPA + optional display name. */
+  upiVpa: process.env.UPI_VPA || "",
+  upiPayeeName: process.env.UPI_PAYEE_NAME || "WedPlan",
+  /** Premium price for UPI, in paise (default ₹499). */
+  upiMonthlyPaise: Number(process.env.UPI_MONTHLY_PAISE || 49900),
 };

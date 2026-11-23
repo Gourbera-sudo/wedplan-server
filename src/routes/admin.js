@@ -122,8 +122,9 @@ export async function moderateService(req, res, next) {
 }
 
 /**
- * GET /api/admin/transactions — view-only ledger. There is deliberately no
- * POST/PATCH here: transactions are only ever written by the Stripe webhook.
+ * GET /api/admin/transactions — full ledger. Stripe rows are written by the
+ * verified webhook; UPI rows are verified through the admin-only PATCH route
+ * in payments.js (never from a client redirect).
  */
 export async function listTransactions(_req, res, next) {
   try {

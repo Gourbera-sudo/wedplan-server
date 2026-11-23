@@ -34,6 +34,10 @@ import {
   createCheckout,
   stripeWebhook,
   paymentStatus,
+  createUpiOrder,
+  submitUpiUtr,
+  upiStatus,
+  verifyUpiPayment,
 } from "./routes/payments.js";
 import { updateProfile, uploadImage } from "./routes/profile.js";
 
@@ -120,6 +124,20 @@ export function createApp() {
   // --- Payments ---
   app.post("/api/payments/checkout", authenticate, createCheckout);
   app.get("/api/payments/status", authenticate, paymentStatus);
+  // UPI: vendor starts the payment and submits the UTR; admin verifies it.
+  app.post(
+    "/api/payments/upi/create",
+    authenticate,
+    requireRole("vendor"),
+    createUpiOrder,
+  );
+  app.post(
+    "/api/payments/upi/submit",
+    authenticate,
+    requireRole("vendor"),
+    submitUpiUtr,
+  );
+  app.get("/api/payments/upi/status", authenticate, upiStatus);
 
   // --- Admin only ---
   app.get("/api/admin/stats", authenticate, requireRole("admin"), adminStats);
@@ -147,6 +165,12 @@ export function createApp() {
     authenticate,
     requireRole("admin"),
     listTransactions,
+  );
+  app.patch(
+    "/api/admin/transactions/:ref/verify",
+    authenticate,
+    requireRole("admin"),
+    verifyUpiPayment,
   );
 
   app.use(notFound);
