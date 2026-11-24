@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { collection } from "../config/db.js";
 import { isServiceCategory, SERVICE_CATEGORIES } from "../config/categories.js";
 import { ApiError } from "../middleware/error.js";
+import { isPremiumActive } from "../lib/subscription.js";
 
 const PUBLIC_FILTER = { isApproved: true, isActive: true };
 const VENDOR_FIELDS = { vendorId: 1 };
@@ -113,6 +114,7 @@ const SERVICE_BODY_FIELDS = [
   "featured",
   "eventTypes",
   "availability",
+  "isActive",
 ];
 
 function pickServiceBody(body) {
@@ -141,6 +143,19 @@ function validateServiceBody(body, { partial = false } = {}) {
   if (body.name !== undefined && !String(body.name).trim()) {
     errors.push("name cannot be empty.");
   }
+  if (body.isActive !== undefined && typeof body.isActive !== "boolean") {
+    errors.push("isActive must be a boolean.");
+  }
+  for (const key of ["eventTypes", "availability"]) {
+    if (body[key] === undefined) continue;
+    if (
+      !Array.isArray(body[key]) ||
+      body[key].length > 12 ||
+      body[key].some((value) => typeof value !== "string" || value.length > 120)
+    ) {
+      errors.push(`${key} must be a list of up to 12 short strings.`);
+    }
+  }
   if (errors.length) throw new ApiError(400, errors.join(" "));
 }
 
@@ -150,8 +165,8 @@ export async function createService(req, res, next) {
     validateServiceBody(req.body);
     const body = pickServiceBody(req.body);
 
-    // Free plan cap: three active listings max.
-    if (req.user.subscriptionPlan !== "premium") {
+    // Free plan cap: three active listings max. Expired premium is free again.
+    if (!isPremiumActive(req.user)) {
       const active = await collection("services").countDocuments({
         vendorId: req.user._id,
         isActive: true,
@@ -171,7 +186,7 @@ export async function createService(req, res, next) {
       vendorId: req.user._id,
       vendorName: req.user.name,
       vendorBusinessName: req.user.businessName || "",
-      vendorVerified: req.user.subscriptionPlan === "premium",
+      vendorVerified: isPremiumActive(req.user),
       isApproved: false, // every new listing waits for admin approval
       isActive: true,
       status: "pending",
@@ -204,10 +219,23 @@ async function loadOwnedService(req) {
   return service;
 }
 
-/** PUT /api/services/:id — owner (or admin) edits; approval is reset to pending. */
+const REVIEW_FIELDS = [
+  "name",
+  "category",
+  "description",
+  "location",
+  "price",
+  "image",
+  "images",
+];
+
+/**
+ * PUT /api/services/:id — owner (or admin) edits. Content changes go back to
+ * pending review; toggling `isActive` alone keeps the existing approval.
+ */
 export async function updateService(req, res, next) {
   try {
-    await loadOwnedService(req);
+    const current = await loadOwnedService(req);
     const { id } = req.params;
     validateServiceBody(req.body, { partial: true });
 
@@ -215,6 +243,16 @@ export async function updateService(req, res, next) {
     delete updates.slug;
     if (updates.price !== undefined) updates.price = Number(updates.price);
     updates.updatedAt = new Date();
+
+    const contentChanged = REVIEW_FIELDS.some(
+      (key) =>
+        key in updates &&
+        JSON.stringify(updates[key]) !== JSON.stringify(current[key] ?? null),
+    );
+    if (contentChanged) {
+      updates.isApproved = false;
+      updates.status = "pending";
+    }
 
     const result = await collection("services").findOneAndUpdate(
       { _id: new ObjectId(id) },

@@ -6,6 +6,7 @@ import { ObjectId } from "mongodb";
 import { env } from "../config/env.js";
 import { collection } from "../config/db.js";
 import { ApiError } from "../middleware/error.js";
+import { effectivePlan, isPremiumActive } from "../lib/subscription.js";
 
 let stripeClient;
 function stripe() {
@@ -79,7 +80,7 @@ function newUpiRef() {
  */
 export async function createCheckout(req, res, next) {
   try {
-    if (req.user.subscriptionPlan === "premium") {
+    if (isPremiumActive(req.user)) {
       throw new ApiError(400, "You are already on the premium plan.");
     }
 
@@ -158,23 +159,43 @@ export async function stripeWebhook(req, res, next) {
       return res.status(400).json({ error: `Webhook signature verification failed: ${err.message}` });
     }
 
-    if (event.type === "checkout.session.completed") {
+    const paidEvents = [
+      "checkout.session.completed",
+      "checkout.session.async_payment_succeeded",
+    ];
+
+    if (paidEvents.includes(event.type) || event.type === "checkout.session.async_payment_failed") {
       const session = event.data.object;
-      const userId = session.metadata?.userId;
+      const paid = event.type !== "checkout.session.async_payment_failed" &&
+        session.payment_status === "paid";
+      const status = event.type === "checkout.session.async_payment_failed"
+        ? "failed"
+        : paid
+          ? "succeeded"
+          : "pending";
 
-      await collection("transactions").updateOne(
-        { stripeSessionId: session.id },
-        {
-          $set: {
-            status: "succeeded",
-            stripePaymentIntent: session.payment_intent || null,
-            paidAt: new Date(),
+      const tx = await collection("transactions").findOne({
+        stripeSessionId: session.id,
+      });
+
+      if (tx) {
+        await collection("transactions").updateOne(
+          { _id: tx._id },
+          {
+            $set: {
+              status,
+              stripePaymentIntent: session.payment_intent || null,
+              paidAt: paid ? new Date() : null,
+            },
           },
-        },
-      );
+        );
 
-      // Activate premium for 30 days — only now, from a verified event.
-      await activatePremium(userId);
+        // Activate premium only after Stripe confirms the money arrived, and
+        // only for the vendor recorded on the transaction at checkout.
+        if (paid && String(tx.userId) === String(session.metadata?.userId)) {
+          await activatePremium(tx.userId);
+        }
+      }
     }
 
     res.json({ received: true });
@@ -208,8 +229,10 @@ export async function paymentStatus(req, res, next) {
       status: session.status,
       paymentStatus: session.payment_status,
       plan: session.metadata?.plan,
+      effectivePlan: effectivePlan(user),
       // The page should trust this flag, which only the webhook can set true.
-      activated: user?.subscriptionPlan === "premium",
+      activated: isPremiumActive(user),
+      subscriptionExpiresAt: user?.subscriptionExpiresAt ?? null,
       transaction: tx || null,
     });
   } catch (err) {
@@ -229,7 +252,7 @@ export async function createUpiOrder(req, res, next) {
     if (req.user.role !== "vendor") {
       throw new ApiError(403, "Only vendors can purchase a subscription.");
     }
-    if (req.user.subscriptionPlan === "premium") {
+    if (isPremiumActive(req.user)) {
       throw new ApiError(400, "You are already on the premium plan.");
     }
 
@@ -371,8 +394,8 @@ export async function upiStatus(req, res, next) {
     res.json({
       status: tx.status,
       utr: tx.utr ?? null,
-      plan: user?.subscriptionPlan ?? "free",
-      activated: user?.subscriptionPlan === "premium",
+      plan: effectivePlan(user),
+      activated: isPremiumActive(user),
       subscriptionExpiresAt: user?.subscriptionExpiresAt ?? null,
     });
   } catch (err) {

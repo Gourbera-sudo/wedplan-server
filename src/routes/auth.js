@@ -5,6 +5,7 @@ import { ApiError } from "../middleware/error.js";
 import { env } from "../config/env.js";
 import { getDatabase } from "../config/db.js";
 import { collection } from "../config/db.js";
+import { effectivePlan } from "../lib/subscription.js";
 import { ObjectId } from "mongodb";
 
 /**
@@ -100,7 +101,13 @@ export async function me(req, res, next) {
       },
     );
     if (!user) throw new ApiError(401, "Account no longer exists.");
-    res.json({ user });
+    res.json({
+      user: {
+        ...user,
+        subscriptionPlan: effectivePlan(user),
+        isPremium: effectivePlan(user) === "premium",
+      },
+    });
   } catch (err) {
     next(err);
   }
