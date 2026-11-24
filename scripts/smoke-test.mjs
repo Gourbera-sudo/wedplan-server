@@ -232,6 +232,16 @@ async function main() {
   });
   check("customer cannot accept → 403", wrongDecider.status === 403);
 
+  const otherVendorDecider = await api(vendor2Token, `/api/bookings/${bookingId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "accepted" }),
+  });
+  check(
+    "other vendor cannot accept → 403",
+    otherVendorDecider.status === 403,
+    `(got ${otherVendorDecider.status})`,
+  );
+
   const accept = await api(vendorToken, `/api/bookings/${bookingId}`, {
     method: "PATCH",
     body: JSON.stringify({ status: "accepted" }),

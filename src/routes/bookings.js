@@ -124,23 +124,25 @@ export async function decideBooking(req, res, next) {
     const booking = await collection("bookings").findOne({ _id: new ObjectId(id) });
     if (!booking) throw new ApiError(404, "Booking not found.");
 
+    const isVendor =
+      req.user.role === "admin" || String(booking.vendorId) === String(req.user._id);
+    const isCustomer = String(booking.customerId) === String(req.user._id);
+
+    // Check authorization before status so a vendor cannot probe another
+    // vendor's booking IDs and learn their state from a 409 response.
+    if (status === "cancelled" && !isCustomer) {
+      throw new ApiError(403, "Only the customer can cancel a booking.");
+    }
+    if ((status === "accepted" || status === "rejected") && !isVendor) {
+      throw new ApiError(403, "Only the vendor can accept or reject a request.");
+    }
+
     // Only pending requests can be decided or cancelled.
     if (booking.status !== "pending") {
       throw new ApiError(
         409,
         `This booking is already ${booking.status} and can no longer be changed.`,
       );
-    }
-
-    const isVendor =
-      req.user.role === "admin" || String(booking.vendorId) === String(req.user._id);
-    const isCustomer = String(booking.customerId) === String(req.user._id);
-
-    if (status === "cancelled" && !isCustomer) {
-      throw new ApiError(403, "Only the customer can cancel a booking.");
-    }
-    if ((status === "accepted" || status === "rejected") && !isVendor) {
-      throw new ApiError(403, "Only the vendor can accept or reject a request.");
     }
 
     const result = await collection("bookings").findOneAndUpdate(
