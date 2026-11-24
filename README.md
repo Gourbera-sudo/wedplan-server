@@ -5,6 +5,10 @@ all data and business rules — role-based access control, service moderation,
 booking lifecycle, Stripe premium subscriptions, and ImgBB image uploads — and
 serves the separate Next.js client (`wedplan-client`).
 
+- **Client repository:** <https://github.com/Gourbera-sudo/wed-plan-client.git>
+- **Live client:** add the deployed URL here after deployment. The API must be
+  reachable at `<API_URL>/api/health` with `CLIENT_URL` set to the client origin.
+
 ## Features
 
 - **JWT authentication bridge** — Better Auth signs users in on the client; this
@@ -22,13 +26,14 @@ serves the separate Next.js client (`wedplan-client`).
 - **Bookings** — customers request bookings; no self-booking, no duplicates per
   service + event date, and only `pending` requests can be accepted, rejected,
   or cancelled (each by the right party).
-- **Admin** — user management (block/unblock, role changes short of admin),
-  service moderation (approve/reject), stats, and a transaction ledger with
-  UPI verification.
+- **Admin** — user management (searchable list, detail view, block/unblock, role
+  and Plan changes short of admin), service moderation (approve/reject/pause/
+  delete), stats, and a transaction ledger with UPI verification.
 - **Stripe premium** — `POST /api/payments/checkout` creates a Checkout session;
   the **raw-body webhook** (`/api/payments/webhook`, signature-verified) is the
   trusted event that activates premium (30 days) and writes the transaction.
-  The client success redirect never trusts itself.
+  The client success redirect never trusts itself. Expired premium automatically
+  falls back to the free-plan limit.
 - **UPI premium** — `POST /api/payments/upi/create` returns a QR/deep link and
   pending reference; `POST /api/payments/upi/submit` records the vendor's UTR.
   Premium activates only through the admin-only
@@ -57,7 +62,7 @@ serves the separate Next.js client (`wedplan-client`).
 | --- | --- | --- | --- |
 | GET | `/api/health` | public | liveness |
 | POST | `/api/auth/token` | session cookie | exchange for API JWT |
-| GET | `/api/auth/me` | authenticated | live profile + role |
+| GET | `/api/auth/me` | authenticated | live profile + role + effective plan |
 | GET | `/api/services` | public | browse: `search`, `category`, `location`, `sort=price_asc\|price_desc`, `page` |
 | GET | `/api/services/featured` | public | up to 6 featured listings |
 | GET | `/api/services/:id` | public/optional auth | detail (hidden services 404) |
@@ -76,9 +81,12 @@ serves the separate Next.js client (`wedplan-client`).
 | POST | `/api/payments/upi/submit` | vendor | record the UTR (status becomes `verifying`) |
 | GET | `/api/payments/upi/status` | authenticated | poll a UPI order (never activates) |
 | GET | `/api/admin/stats` | admin | dashboard counters |
-| GET/PATCH | `/api/admin/users[/:id]` | admin | list · block/unblock · role (never admin) |
+| GET | `/api/admin/users` | admin | list accounts |
+| GET/PATCH | `/api/admin/users/:id` | admin | detail · block/unblock · role (never admin) · plan |
 | GET | `/api/admin/services` | admin | every listing incl. unapproved |
 | PATCH | `/api/admin/services/:id` | admin | `approve` / `reject` |
+| PATCH | `/api/admin/services/:id/status` | admin | pause / reactivate, approval unchanged |
+| DELETE | `/api/admin/services/:id` | admin | permanently remove a listing |
 | GET | `/api/admin/transactions` | admin | full ledger |
 | PATCH | `/api/admin/transactions/:ref/verify` | admin | `approve` / `reject` a UPI payment — the trusted activation event |
 
@@ -148,8 +156,18 @@ With the server **and** the client (`wedplan-client`, port 3000) running:
 
 ```bash
 node scripts/smoke-test.mjs
-# 46 passed, 0 failed
+# 54 passed, 0 failed
 ```
+
+If you have bookings created by the old client-side server action, normalize them
+once before running the suite:
+
+```bash
+node scripts/migrate-bookings.mjs
+```
+
+It converts string IDs and capitalized statuses to the current schema and fills
+missing denormalized display fields. It is safe to re-run.
 
 ## Project structure
 
@@ -161,6 +179,7 @@ src/
   config/categories.js the six canonical service categories
   middleware/auth.js   JWT sign/verify, requireRole, optionalAuth
   middleware/error.js  ApiError + central JSON error handler
+  lib/subscription.js  effective plan (expired premium → free)
   routes/auth.js       session-cookie → API JWT exchange, /me
   routes/services.js   public browse + vendor CRUD + ownership checks
   routes/bookings.js   booking rules (self/duplicate/status transitions)
@@ -170,10 +189,13 @@ src/
   app.js               Express app, CORS, route table
 scripts/
   seed.js              repeatable demo seed
-  smoke-test.mjs       46-check end-to-end suite
+  smoke-test.mjs       54-check end-to-end suite
+  migrate-bookings.mjs one-time legacy booking normalization
 ```
 
 ## Related repositories
 
-- **Client:** `wedplan-client` — Next.js 16 (App Router) UI, Better Auth
-  sign-in, role dashboards.
+- **Client:** <https://github.com/Gourbera-sudo/wed-plan-client.git> — Next.js 16
+  (App Router) UI, Better Auth sign-in, role dashboards.
+- **Live client:** record the deployed URL at the top of this README once the
+  client is published.
