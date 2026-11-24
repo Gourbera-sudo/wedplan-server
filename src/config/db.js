@@ -24,6 +24,18 @@ export async function connectDatabase() {
     db.collection("bookings").createIndex({ vendorId: 1, status: 1 }),
     db.collection("bookings").createIndex({ customerId: 1, createdAt: -1 }),
     db
+      .collection("bookings")
+      .createIndex(
+        { serviceId: 1, customerId: 1, eventDate: 1 },
+        {
+          name: "one_active_booking_per_date",
+          unique: true,
+          partialFilterExpression: {
+            status: { $in: ["pending", "accepted"] },
+          },
+        },
+      ),
+    db
       .collection("transactions")
       .createIndex({ stripeSessionId: 1 }, { unique: true }),
     db.collection("transactions").createIndex({ userId: 1 }),

@@ -14,6 +14,10 @@ function isValidId(id) {
  */
 export async function createBooking(req, res, next) {
   try {
+    if (req.user.role === "admin") {
+      throw new ApiError(403, "Admin accounts cannot submit customer booking requests.");
+    }
+
     const { serviceId, eventDate, eventLocation, guests, message } = req.body || {};
     if (!isValidId(serviceId)) throw new ApiError(400, "Invalid service.");
     if (!eventDate) throw new ApiError(400, "Event date is required.");
@@ -33,11 +37,13 @@ export async function createBooking(req, res, next) {
       throw new ApiError(400, "You cannot book your own service.");
     }
 
-    // One booking per customer per service per event date.
+    // One active request per customer per service per event date. Cancelled
+    // and rejected requests are closed, so a fresh request is allowed.
     const duplicate = await collection("bookings").findOne({
       serviceId: service._id,
       customerId: req.user._id,
       eventDate: new Date(eventDate),
+      status: { $in: ["pending", "accepted"] },
     });
     if (duplicate) {
       throw new ApiError(409, "You already requested this service for that date.");
@@ -66,6 +72,11 @@ export async function createBooking(req, res, next) {
     const result = await collection("bookings").insertOne(doc);
     res.status(201).json({ booking: { ...doc, _id: result.insertedId } });
   } catch (err) {
+    // The partial unique index is the final guard against concurrent requests.
+    if (err?.code === 11000) {
+      next(new ApiError(409, "You already requested this service for that date."));
+      return;
+    }
     next(err);
   }
 }
