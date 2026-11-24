@@ -23,10 +23,13 @@ import {
   decideBooking,
 } from "./routes/bookings.js";
 import {
+  getUser,
   listUsers,
   updateUser,
   listAllServices,
   moderateService,
+  setServiceStatus,
+  deleteService as deleteAdminService,
   listTransactions,
   adminStats,
 } from "./routes/admin.js";
@@ -142,6 +145,12 @@ export function createApp() {
   // --- Admin only ---
   app.get("/api/admin/stats", authenticate, requireRole("admin"), adminStats);
   app.get("/api/admin/users", authenticate, requireRole("admin"), listUsers);
+  app.get(
+    "/api/admin/users/:id",
+    authenticate,
+    requireRole("admin"),
+    getUser,
+  );
   app.patch(
     "/api/admin/users/:id",
     authenticate,
@@ -159,6 +168,18 @@ export function createApp() {
     authenticate,
     requireRole("admin"),
     moderateService,
+  );
+  app.patch(
+    "/api/admin/services/:id/status",
+    authenticate,
+    requireRole("admin"),
+    setServiceStatus,
+  );
+  app.delete(
+    "/api/admin/services/:id",
+    authenticate,
+    requireRole("admin"),
+    deleteAdminService,
   );
   app.get(
     "/api/admin/transactions",
