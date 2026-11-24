@@ -166,6 +166,17 @@ async function main() {
   const adminOnAdmin = await api(adminToken, "/api/admin/users");
   check("admin → /admin/users = 200", adminOnAdmin.status === 200);
 
+  const userDetail = await api(
+    adminToken,
+    `/api/admin/users/${adminOnAdmin.body.users[0]._id}`,
+  );
+  check(
+    "admin user detail omits password",
+    userDetail.status === 200 &&
+      Boolean(userDetail.body.user?.email) &&
+      userDetail.body.user.password === undefined,
+  );
+
   // better-auth refuses to sign a blocked account in at all.
   let blockedSignIn = null;
   try {
@@ -207,6 +218,12 @@ async function main() {
     body: JSON.stringify({ serviceId: bookable._id, eventDate }),
   });
   check("vendor cannot book own service → 400", vendorSelfBook.status === 400);
+
+  const adminBook = await api(adminToken, "/api/bookings", {
+    method: "POST",
+    body: JSON.stringify({ serviceId: bookable._id, eventDate }),
+  });
+  check("admin cannot submit customer booking → 403", adminBook.status === 403);
 
   const bookingId = selfBook.body.booking._id;
   const wrongDecider = await api(customerToken, `/api/bookings/${bookingId}`, {
@@ -273,6 +290,27 @@ async function main() {
     newService.body?.service?.isApproved === false,
   );
 
+  const edited = await api(vendor2Token, `/api/vendor/services/${newService.body.service._id}`, {
+    method: "PUT",
+    body: JSON.stringify({ description: "Updated description for review." }),
+  });
+  check("content edit resets approval to pending", edited.body?.service?.isApproved === false);
+
+  const availabilityOnly = await api(vendor2Token, `/api/vendor/services/${newService.body.service._id}`, {
+    method: "PUT",
+    body: JSON.stringify({ isActive: false }),
+  });
+  check(
+    "availability change keeps pending review",
+    availabilityOnly.body?.service?.isActive === false &&
+      availabilityOnly.body?.service?.isApproved === false,
+  );
+
+  await api(vendor2Token, `/api/vendor/services/${newService.body.service._id}`, {
+    method: "PUT",
+    body: JSON.stringify({ isActive: true }),
+  });
+
   const foreignEdit = await api(vendorToken, `/api/vendor/services/${newService.body.service._id}`, {
     method: "PUT",
     body: JSON.stringify({ price: 1 }),
@@ -301,6 +339,22 @@ async function main() {
 
   const nowPublic = await api(null, `/api/services/${newService.body.service._id}`);
   check("approved service is publicly visible", nowPublic.status === 200);
+
+  const paused = await api(adminToken, `/api/admin/services/${newService.body.service._id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ isActive: false }),
+  });
+  check(
+    "admin pause keeps approval but hides listing",
+    paused.body?.service?.isActive === false && paused.body?.service?.isApproved === true,
+  );
+  const pausedPublic = await api(null, `/api/services/${newService.body.service._id}`);
+  check("paused service → 404 publicly", pausedPublic.status === 404);
+
+  await api(adminToken, `/api/admin/services/${newService.body.service._id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ isActive: true }),
+  });
 
   const reject = await api(adminToken, `/api/admin/services/${newService.body.service._id}`, {
     method: "PATCH",
@@ -347,6 +401,12 @@ async function main() {
   const vendorTx = await api(vendorToken, "/api/admin/transactions");
   check("vendor cannot view transactions → 403", vendorTx.status === 403);
 
+  const stats = await api(adminToken, "/api/admin/stats");
+  check(
+    "admin stats include vendors and customers",
+    typeof stats.body?.vendors === "number" && typeof stats.body?.customers === "number",
+  );
+
   console.log("\n7. Unconfigured integrations degrade cleanly");
   const checkout = await api(customerToken, "/api/payments/checkout", {
     method: "POST",
@@ -386,9 +446,10 @@ async function main() {
   );
 
   // Cleanup smoke-test artifacts so re-runs are clean.
-  await api(vendor2Token, `/api/vendor/services/${newService.body.service._id}`, {
+  const adminDelete = await api(adminToken, `/api/admin/services/${newService.body.service._id}`, {
     method: "DELETE",
   });
+  check("admin can delete an inappropriate service", adminDelete.status === 200);
   const bookings = (await api(customerToken, "/api/bookings/mine")).body.bookings;
   for (const b of bookings) {
     await api(customerToken, `/api/bookings/${b._id}`, {
