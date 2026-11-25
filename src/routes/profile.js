@@ -2,6 +2,13 @@ import { collection } from "../config/db.js";
 import { env } from "../config/env.js";
 import { ApiError } from "../middleware/error.js";
 
+function boundedString(value, label, max, { required = false } = {}) {
+  const text = String(value ?? "").trim();
+  if (required && !text) throw new ApiError(400, `${label} cannot be empty.`);
+  if (text.length > max) throw new ApiError(400, `${label} is too long.`);
+  return text;
+}
+
 /**
  * PATCH /api/profile — update the caller's own profile. Role, blocking and
  * subscription fields are deliberately NOT accepted here; those are admin-only
@@ -12,15 +19,29 @@ export async function updateProfile(req, res, next) {
     const { name, image, bio, phone, businessName } = req.body || {};
     const updates = { updatedAt: new Date() };
 
-    if (name !== undefined) {
-      const trimmed = String(name).trim();
-      if (!trimmed) throw new ApiError(400, "Name cannot be empty.");
-      updates.name = trimmed;
+    if (name !== undefined) updates.name = boundedString(name, "Name", 100, { required: true });
+    if (image !== undefined) {
+      if (image === "") {
+        updates.image = "";
+      } else {
+        const url = boundedString(image, "Profile image", 2048, { required: true });
+        let parsed;
+        try {
+          parsed = new URL(url);
+        } catch {
+          throw new ApiError(400, "Profile image must be a valid URL.");
+        }
+        if (!["http:", "https:"].includes(parsed.protocol)) {
+          throw new ApiError(400, "Profile image must be an http(s) URL.");
+        }
+        updates.image = url;
+      }
     }
-    if (image !== undefined) updates.image = image === "" ? "" : String(image);
-    if (bio !== undefined) updates.bio = String(bio);
-    if (phone !== undefined) updates.phone = String(phone);
-    if (businessName !== undefined) updates.businessName = String(businessName);
+    if (bio !== undefined) updates.bio = boundedString(bio, "Bio", 1000);
+    if (phone !== undefined) updates.phone = boundedString(phone, "Phone", 30);
+    if (businessName !== undefined) {
+      updates.businessName = boundedString(businessName, "Business name", 120);
+    }
 
     const user = await collection("user").findOneAndUpdate(
       { _id: req.user._id },
@@ -53,10 +74,25 @@ export async function uploadImage(req, res, next) {
       throw new ApiError(400, "imageBase64 is required.");
     }
 
-    // Accept raw base64 or a full data: URL.
-    const base64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-    if (base64.length > 4 * 1024 * 1024) {
+    // Accept raw base64 or a full image data URL, with real MIME/size checks.
+    const dataUrl = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/.exec(imageBase64);
+    const base64 = dataUrl ? dataUrl[2] : imageBase64;
+    if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+      throw new ApiError(400, "Upload must contain valid base64 image data.");
+    }
+    const bytes = Buffer.from(base64, "base64");
+    if (!bytes.length) throw new ApiError(400, "Image data is empty.");
+    if (bytes.length > 4 * 1024 * 1024) {
       throw new ApiError(413, "Image must be smaller than 4 MB.");
+    }
+    const isPng = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    const isWebp =
+      bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+      bytes.subarray(8, 12).toString("ascii") === "WEBP";
+    const isGif = bytes.subarray(0, 3).toString("ascii") === "GIF";
+    if (!isPng && !isJpeg && !isWebp && !isGif) {
+      throw new ApiError(400, "Only PNG, JPEG, WebP, or GIF images are supported.");
     }
 
     const form = new FormData();

@@ -1,7 +1,13 @@
 import { ObjectId } from "mongodb";
 
+import { isServiceCategory } from "../config/categories.js";
 import { collection } from "../config/db.js";
 import { ApiError } from "../middleware/error.js";
+
+function regexTerm(value) {
+  const escaped = String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped, "i");
+}
 
 /** GET /api/admin/users/:id — full account detail (passwords never returned). */
 export async function getUser(req, res, next) {
@@ -19,11 +25,24 @@ export async function getUser(req, res, next) {
   }
 }
 
-/** GET /api/admin/users — list every account (admin only). */
-export async function listUsers(_req, res, next) {
+/** GET /api/admin/users — list accounts with optional server-side filters. */
+export async function listUsers(req, res, next) {
   try {
+    const search = String(req.query.search || "").trim();
+    const role = String(req.query.role || "").trim();
+    const filter = {};
+
+    if (["customer", "vendor", "admin"].includes(role)) filter.role = role;
+    if (search) {
+      filter.$or = [
+        { name: regexTerm(search) },
+        { email: regexTerm(search) },
+        { businessName: regexTerm(search) },
+      ];
+    }
+
     const users = await collection("user")
-      .find({}, { projection: { password: 0 } })
+      .find(filter, { projection: { password: 0 } })
       .sort({ createdAt: -1 })
       .toArray();
     res.json({ users });
@@ -46,7 +65,10 @@ export async function updateUser(req, res, next) {
     const self = String(req.user._id) === String(targetId);
 
     const updates = {};
-    const { role, isBlocked, businessName, subscriptionPlan } = req.body || {};
+    // Subscription plan is deliberately ignored: premium must only come from a
+    // verified payment (Stripe webhook or admin-verified UPI), never an admin
+    // user-edit shortcut.
+    const { role, isBlocked, businessName } = req.body || {};
 
     if (role !== undefined) {
       if (!["customer", "vendor", "admin"].includes(role)) {
@@ -68,12 +90,10 @@ export async function updateUser(req, res, next) {
       updates.banned = isBlocked; // better-auth's own flag, kept in sync
     }
 
-    if (businessName !== undefined) updates.businessName = String(businessName);
-    if (subscriptionPlan !== undefined) {
-      if (!["free", "premium"].includes(subscriptionPlan)) {
-        throw new ApiError(400, "Invalid subscription plan.");
-      }
-      updates.subscriptionPlan = subscriptionPlan;
+    if (businessName !== undefined) {
+      const name = String(businessName).trim();
+      if (name.length > 120) throw new ApiError(400, "Business name is too long.");
+      updates.businessName = name;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -94,10 +114,28 @@ export async function updateUser(req, res, next) {
 }
 
 /** GET /api/admin/services — every listing, including unapproved ones. */
-export async function listAllServices(_req, res, next) {
+export async function listAllServices(req, res, next) {
   try {
+    const search = String(req.query.search || "").trim();
+    const category = String(req.query.category || "").trim();
+    const status = String(req.query.status || "").trim();
+    const active = String(req.query.isActive || "").trim();
+    const filter = {};
+
+    if (isServiceCategory(category)) filter.category = category;
+    if (["pending", "approved", "rejected"].includes(status)) filter.status = status;
+    if (active === "true" || active === "false") filter.isActive = active === "true";
+    if (search) {
+      filter.$or = [
+        { name: regexTerm(search) },
+        { description: regexTerm(search) },
+        { location: regexTerm(search) },
+        { vendorName: regexTerm(search) },
+      ];
+    }
+
     const services = await collection("services")
-      .find({})
+      .find(filter)
       .sort({ createdAt: -1 })
       .toArray();
     res.json({ services });
@@ -180,12 +218,50 @@ export async function deleteService(req, res, next) {
  * verified webhook; UPI rows are verified through the admin-only PATCH route
  * in payments.js (never from a client redirect).
  */
-export async function listTransactions(_req, res, next) {
+export async function listTransactions(req, res, next) {
   try {
-    const transactions = await collection("transactions")
+    const search = String(req.query.search || "").trim().toLowerCase();
+    const rows = await collection("transactions")
       .find({})
       .sort({ createdAt: -1 })
       .toArray();
+
+    const ids = [
+      ...new Set(rows.map((tx) => String(tx.vendorId || tx.userId || ""))),
+    ]
+      .filter((id) => ObjectId.isValid(id))
+      .map((id) => new ObjectId(id));
+    const vendors = ids.length
+      ? await collection("user")
+          .find(
+            { _id: { $in: ids } },
+            { projection: { name: 1, email: 1, image: 1 } },
+          )
+          .toArray()
+      : [];
+    const byId = new Map(vendors.map((vendor) => [String(vendor._id), vendor]));
+
+    const transactions = rows
+      .map((tx) => {
+        const ownerId = String(tx.vendorId || tx.userId || "");
+        const vendor = byId.get(ownerId) ?? null;
+        return {
+          ...tx,
+          vendorId: tx.vendorId || tx.userId,
+          vendor: vendor
+            ? { name: vendor.name, email: vendor.email, image: vendor.image || "" }
+            : null,
+          vendorName: vendor?.name ?? "",
+          vendorEmail: vendor?.email ?? "",
+        };
+      })
+      .filter((tx) => {
+        if (!search) return true;
+        return [tx.vendorName, tx.vendorEmail, tx.ref, tx.plan, tx.status, tx.stripeSessionId]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(search));
+      });
+
     res.json({ transactions });
   } catch (err) {
     next(err);

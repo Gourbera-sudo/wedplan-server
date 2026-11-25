@@ -26,14 +26,16 @@ serves the separate Next.js client (`wedplan-client`).
 - **Bookings** — customers request bookings; no self-booking, no duplicates per
   service + event date, and only `pending` requests can be accepted, rejected,
   or cancelled (each by the right party).
-- **Admin** — user management (searchable list, detail view, block/unblock, role
-  and Plan changes short of admin), service moderation (approve/reject/pause/
-  delete), stats, and a transaction ledger with UPI verification.
-- **Stripe premium** — `POST /api/payments/checkout` creates a Checkout session;
-  the **raw-body webhook** (`/api/payments/webhook`, signature-verified) is the
-  trusted event that activates premium (30 days) and writes the transaction.
-  The client success redirect never trusts itself. Expired premium automatically
-  falls back to the free-plan limit.
+- **Admin** — user management (server-side search/role filters, detail view,
+  block/unblock, role and business-name changes short of admin — no plan grants),
+  service moderation with server-side filters (approve/reject/pause/delete),
+  stats, and a transaction ledger with vendor identity and UPI verification.
+- **Stripe premium** — `POST /api/payments/checkout` is vendor-only and creates a
+  Checkout session; the **raw-body webhook** (`/api/payments/webhook`,
+  signature-verified) is the trusted event that activates premium (30 days) and
+  writes the transaction. Redeliveries are idempotent; refunds, disputes, and
+  cancellations revoke premium. The client success redirect never trusts itself,
+  and expired premium automatically falls back to the free-plan limit.
 - **UPI premium** — `POST /api/payments/upi/create` returns a QR/deep link and
   pending reference; `POST /api/payments/upi/submit` records the vendor's UTR.
   Premium activates only through the admin-only
@@ -53,7 +55,7 @@ serves the separate Next.js client (`wedplan-client`).
   cookies; password hashing compatible with Better Auth (`@better-auth/utils`)
 - **Payments:** Stripe Checkout (`stripe`)
 - **Images:** ImgBB REST API
-- **Testing:** `scripts/smoke-test.mjs` — 46 end-to-end checks that sign in
+- **Testing:** `scripts/smoke-test.mjs` — 62 end-to-end checks that sign in
   through the real client and assert every business rule
 
 ## API overview
@@ -70,20 +72,20 @@ serves the separate Next.js client (`wedplan-client`).
 | PUT/DELETE | `/api/vendor/services/:id` | owner, admin | edit / remove |
 | POST | `/api/bookings` | authenticated | request booking (self → 400, dup → 409) |
 | GET | `/api/bookings/mine` | authenticated | own bookings (customer view) |
-| GET | `/api/bookings/requests` | vendor, admin | incoming requests |
+| GET | `/api/bookings/requests` | vendor | incoming requests |
 | PATCH | `/api/bookings/:id` | owner parties | accept/reject (vendor) · cancel (customer) — pending only |
 | PATCH | `/api/profile` | authenticated | update own profile (no role/plan self-promotion) |
 | POST | `/api/profile/image` | authenticated | ImgBB upload |
-| POST | `/api/payments/checkout` | authenticated | Stripe Checkout session |
+| POST | `/api/payments/checkout` | vendor | Stripe Checkout session |
 | GET | `/api/payments/status` | authenticated | verify a session with Stripe |
-| POST | `/api/payments/webhook` | Stripe signature | verified Stripe event that activates premium |
+| POST | `/api/payments/webhook` | Stripe signature | verified event: activates, expires, or revokes premium |
 | POST | `/api/payments/upi/create` | vendor | create a pending UPI order + QR/deep link |
 | POST | `/api/payments/upi/submit` | vendor | record the UTR (status becomes `verifying`) |
 | GET | `/api/payments/upi/status` | authenticated | poll a UPI order (never activates) |
 | GET | `/api/admin/stats` | admin | dashboard counters |
-| GET | `/api/admin/users` | admin | list accounts |
-| GET/PATCH | `/api/admin/users/:id` | admin | detail · block/unblock · role (never admin) · plan |
-| GET | `/api/admin/services` | admin | every listing incl. unapproved |
+| GET | `/api/admin/users` | admin | list accounts; `search`, `role` filters |
+| GET/PATCH | `/api/admin/users/:id` | admin | detail · block/unblock · role (never admin) · business name (no plan grant) |
+| GET | `/api/admin/services` | admin | every listing incl. unapproved; `search`, `category`, `status`, `isActive` filters |
 | PATCH | `/api/admin/services/:id` | admin | `approve` / `reject` |
 | PATCH | `/api/admin/services/:id/status` | admin | pause / reactivate, approval unchanged |
 | DELETE | `/api/admin/services/:id` | admin | permanently remove a listing |

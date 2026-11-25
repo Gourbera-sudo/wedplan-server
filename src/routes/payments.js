@@ -51,6 +51,45 @@ export async function activatePremium(userId) {
   return true;
 }
 
+/** Revoke a paid plan when Stripe reports a refund, dispute, or cancellation. */
+async function expirePremium(userId) {
+  if (!ObjectId.isValid(userId)) return false;
+  const now = new Date();
+  await collection("user").updateOne(
+    { _id: new ObjectId(userId) },
+    {
+      $set: {
+        subscriptionPlan: "free",
+        subscriptionExpiresAt: now,
+        updatedAt: now,
+      },
+    },
+  );
+  await collection("services").updateMany(
+    { vendorId: new ObjectId(userId) },
+    { $set: { vendorVerified: false, updatedAt: now } },
+  );
+  return true;
+}
+
+async function markRefundedAndExpire(query, eventId) {
+  const tx = await collection("transactions").findOne(query);
+  if (!tx) return;
+  const updated = await collection("transactions").findOneAndUpdate(
+    { _id: tx._id, stripeRevokeEventId: { $exists: false } },
+    {
+      $set: {
+        status: "refunded",
+        stripeRevokeEventId: eventId,
+        refundedAt: new Date(),
+        updatedAt: new Date(),
+      },
+    },
+    { returnDocument: "after" },
+  );
+  if (updated) await expirePremium(tx.vendorId || tx.userId);
+}
+
 function upiConfig() {
   if (!env.upiVpa) {
     throw new ApiError(
@@ -80,6 +119,9 @@ function newUpiRef() {
  */
 export async function createCheckout(req, res, next) {
   try {
+    if (req.user.role !== "vendor") {
+      throw new ApiError(403, "Only vendors can purchase a subscription.");
+    }
     if (isPremiumActive(req.user)) {
       throw new ApiError(400, "You are already on the premium plan.");
     }
@@ -115,12 +157,16 @@ export async function createCheckout(req, res, next) {
         $set: {
           stripeSessionId: session.id,
           userId: req.user._id,
+          vendorId: req.user._id,
+          stripeSubscriptionId: session.subscription || null,
           amount: 4900,
           currency: "usd",
           status: "pending",
           plan: "premium",
-          createdAt: new Date(),
+          method: "stripe",
+          updatedAt: new Date(),
         },
+        $setOnInsert: { createdAt: new Date() },
       },
       { upsert: true },
     );
@@ -159,43 +205,83 @@ export async function stripeWebhook(req, res, next) {
       return res.status(400).json({ error: `Webhook signature verification failed: ${err.message}` });
     }
 
-    const paidEvents = [
+    const paidEvents = new Set([
       "checkout.session.completed",
       "checkout.session.async_payment_succeeded",
-    ];
+    ]);
+    const failedEvents = new Set([
+      "checkout.session.async_payment_failed",
+      "checkout.session.expired",
+    ]);
 
-    if (paidEvents.includes(event.type) || event.type === "checkout.session.async_payment_failed") {
+    if (paidEvents.has(event.type) || failedEvents.has(event.type)) {
       const session = event.data.object;
-      const paid = event.type !== "checkout.session.async_payment_failed" &&
-        session.payment_status === "paid";
-      const status = event.type === "checkout.session.async_payment_failed"
-        ? "failed"
-        : paid
-          ? "succeeded"
-          : "pending";
-
+      const paid = paidEvents.has(event.type) && session.payment_status === "paid";
+      const status = paid ? "succeeded" : failedEvents.has(event.type) ? "failed" : "pending";
       const tx = await collection("transactions").findOne({
         stripeSessionId: session.id,
       });
 
       if (tx) {
-        await collection("transactions").updateOne(
-          { _id: tx._id },
-          {
-            $set: {
-              status,
-              stripePaymentIntent: session.payment_intent || null,
-              paidAt: paid ? new Date() : null,
+        const ownerId = String(tx.vendorId || tx.userId);
+        if (paid) {
+          // A finalized payment is claimed once. Stripe may redeliver this
+          // event; without the claim it would extend premium on every retry.
+          const finalized = await collection("transactions").findOneAndUpdate(
+            { _id: tx._id, paymentFinalizedAt: { $exists: false } },
+            {
+              $set: {
+                status,
+                stripeEventId: event.id,
+                stripePaymentIntent: session.payment_intent || null,
+                stripeSubscriptionId:
+                  session.subscription || tx.stripeSubscriptionId || null,
+                paidAt: new Date(),
+                paymentFinalizedAt: new Date(),
+                updatedAt: new Date(),
+              },
             },
-          },
-        );
+            { returnDocument: "after" },
+          );
 
-        // Activate premium only after Stripe confirms the money arrived, and
-        // only for the vendor recorded on the transaction at checkout.
-        if (paid && String(tx.userId) === String(session.metadata?.userId)) {
-          await activatePremium(tx.userId);
+          // Activate only after Stripe confirms the money arrived, and only
+          // for the vendor recorded on the transaction at checkout.
+          if (finalized && ownerId === String(session.metadata?.userId)) {
+            await activatePremium(ownerId);
+          }
+        } else {
+          await collection("transactions").updateOne(
+            { _id: tx._id, paymentFinalizedAt: { $exists: false } },
+            {
+              $set: {
+                status,
+                stripeEventId: event.id,
+                stripePaymentIntent: session.payment_intent || null,
+                paidAt: null,
+                updatedAt: new Date(),
+              },
+            },
+          );
         }
       }
+    }
+
+    // Money returned or a subscription cancelled: revoke the paid benefits.
+    if (event.type === "charge.refunded" || event.type === "charge.dispute.created") {
+      const charge = event.data.object;
+      const paymentIntent =
+        typeof charge.payment_intent === "string"
+          ? charge.payment_intent
+          : charge.payment_intent?.id;
+      if (paymentIntent) {
+        await markRefundedAndExpire({ stripePaymentIntent: paymentIntent }, event.id);
+      }
+    }
+    if (event.type === "customer.subscription.deleted") {
+      await markRefundedAndExpire(
+        { stripeSubscriptionId: event.data.object.id },
+        event.id,
+      );
     }
 
     res.json({ received: true });
@@ -292,6 +378,8 @@ export async function createUpiOrder(req, res, next) {
     await collection("transactions").insertOne({
       ref,
       userId: req.user._id,
+      vendorId: req.user._id,
+      stripeSubscriptionId: null,
       amount: amountPaise,
       currency: "inr",
       status: "awaiting_upi",

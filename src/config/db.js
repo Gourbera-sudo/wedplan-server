@@ -38,7 +38,9 @@ export async function connectDatabase() {
     db
       .collection("transactions")
       .createIndex({ stripeSessionId: 1 }, { unique: true }),
+    db.collection("transactions").createIndex({ stripePaymentIntent: 1 }),
     db.collection("transactions").createIndex({ userId: 1 }),
+    db.collection("transactions").createIndex({ vendorId: 1 }),
   ]);
 
   return db;

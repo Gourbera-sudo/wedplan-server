@@ -115,7 +115,7 @@ export function createApp() {
   app.get(
     "/api/bookings/requests",
     authenticate,
-    requireRole("vendor", "admin"),
+    requireRole("vendor"),
     bookingRequests,
   );
   app.patch("/api/bookings/:id", authenticate, decideBooking);
@@ -125,7 +125,12 @@ export function createApp() {
   app.post("/api/profile/image", authenticate, uploadImage);
 
   // --- Payments ---
-  app.post("/api/payments/checkout", authenticate, createCheckout);
+  app.post(
+    "/api/payments/checkout",
+    authenticate,
+    requireRole("vendor"),
+    createCheckout,
+  );
   app.get("/api/payments/status", authenticate, paymentStatus);
   // UPI: vendor starts the payment and submits the UTR; admin verifies it.
   app.post(

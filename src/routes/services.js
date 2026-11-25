@@ -8,6 +8,40 @@ import { isPremiumActive } from "../lib/subscription.js";
 const PUBLIC_FILTER = { isApproved: true, isActive: true };
 const VENDOR_FIELDS = { vendorId: 1 };
 
+/**
+ * A vendor's premium badge expires with the plan. Derive it from live user
+ * state on public reads so an expired vendor is never shown as verified,
+ * even if no authenticated request has run since the expiry.
+ */
+async function withEffectiveVerification(items) {
+  const vendorIds = [
+    ...new Set(
+      items
+        .filter((item) => item.vendorVerified)
+        .map((item) => String(item.vendorId || "")),
+    ),
+  ]
+    .filter((id) => ObjectId.isValid(id))
+    .map((id) => new ObjectId(id));
+  if (!vendorIds.length) return items;
+
+  const vendors = await collection("user")
+    .find(
+      { _id: { $in: vendorIds } },
+      { projection: { subscriptionPlan: 1, subscriptionExpiresAt: 1 } },
+    )
+    .toArray();
+  const activeIds = new Set(
+    vendors.filter(isPremiumActive).map((vendor) => String(vendor._id)),
+  );
+
+  return items.map((item) =>
+    item.vendorVerified && !activeIds.has(String(item.vendorId))
+      ? { ...item, vendorVerified: false }
+      : item,
+  );
+}
+
 function parseListQuery(query) {
   const search = String(query.search || "").trim();
   const category = String(query.category || "").trim();
@@ -48,7 +82,7 @@ export async function listServices(req, res, next) {
     const sort = query.sort === "price_desc" ? { price: -1 } : { price: 1 };
 
     const db = collection("services");
-    const [items, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       db
         .find(filter)
         .sort({ ...sort, createdAt: -1 })
@@ -57,6 +91,7 @@ export async function listServices(req, res, next) {
         .toArray(),
       db.countDocuments(filter),
     ]);
+    const items = await withEffectiveVerification(rows);
 
     res.json({
       services: items,
@@ -73,11 +108,12 @@ export async function listServices(req, res, next) {
 /** GET /api/services/featured — the home page carousel (max 6, approved only). */
 export async function featuredServices(_req, res, next) {
   try {
-    const items = await collection("services")
+    const rows = await collection("services")
       .find({ ...PUBLIC_FILTER, featured: true })
       .sort({ order: 1, createdAt: -1 })
       .limit(6)
       .toArray();
+    const items = await withEffectiveVerification(rows);
     res.json({ services: items });
   } catch (err) {
     next(err);
@@ -96,7 +132,8 @@ export async function getService(req, res, next) {
     if (!isOwner && !isAdmin && (!service.isApproved || !service.isActive)) {
       throw new ApiError(404, "Service not found.");
     }
-    res.json({ service });
+    const [verified] = await withEffectiveVerification([service]);
+    res.json({ service: verified });
   } catch (err) {
     next(err);
   }

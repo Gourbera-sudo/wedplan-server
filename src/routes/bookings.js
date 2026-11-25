@@ -21,7 +21,11 @@ export async function createBooking(req, res, next) {
     const { serviceId, eventDate, eventLocation, guests, message } = req.body || {};
     if (!isValidId(serviceId)) throw new ApiError(400, "Invalid service.");
     if (!eventDate) throw new ApiError(400, "Event date is required.");
-    if (new Date(eventDate) < new Date(new Date().toDateString())) {
+    const eventDateValue = new Date(eventDate);
+    if (!Number.isFinite(eventDateValue.getTime())) {
+      throw new ApiError(400, "Enter a valid event date.");
+    }
+    if (eventDateValue < new Date(new Date().toDateString())) {
       throw new ApiError(400, "Event date cannot be in the past.");
     }
 
@@ -42,7 +46,7 @@ export async function createBooking(req, res, next) {
     const duplicate = await collection("bookings").findOne({
       serviceId: service._id,
       customerId: req.user._id,
-      eventDate: new Date(eventDate),
+      eventDate: eventDateValue,
       status: { $in: ["pending", "accepted"] },
     });
     if (duplicate) {
@@ -60,7 +64,7 @@ export async function createBooking(req, res, next) {
       customerId: req.user._id,
       customerName: req.user.name,
       customerEmail: req.user.email,
-      eventDate: new Date(eventDate),
+      eventDate: eventDateValue,
       eventLocation: String(eventLocation || service.location || ""),
       guests: Number(guests) || 0,
       message: String(message || ""),
@@ -124,8 +128,7 @@ export async function decideBooking(req, res, next) {
     const booking = await collection("bookings").findOne({ _id: new ObjectId(id) });
     if (!booking) throw new ApiError(404, "Booking not found.");
 
-    const isVendor =
-      req.user.role === "admin" || String(booking.vendorId) === String(req.user._id);
+    const isVendor = String(booking.vendorId) === String(req.user._id);
     const isCustomer = String(booking.customerId) === String(req.user._id);
 
     // Check authorization before status so a vendor cannot probe another

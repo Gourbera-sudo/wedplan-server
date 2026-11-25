@@ -201,6 +201,12 @@ async function main() {
   const bookable = willow.body.services[0];
   const eventDate = TEST_EVENT_DATE;
 
+  const invalidDate = await api(customerToken, "/api/bookings", {
+    method: "POST",
+    body: JSON.stringify({ serviceId: bookable._id, eventDate: "not-a-date" }),
+  });
+  check("invalid event date → 400", invalidDate.status === 400);
+
   const selfBook = await api(customerToken, "/api/bookings", {
     method: "POST",
     body: JSON.stringify({ serviceId: bookable._id, eventDate }),
@@ -231,6 +237,12 @@ async function main() {
     body: JSON.stringify({ status: "accepted" }),
   });
   check("customer cannot accept → 403", wrongDecider.status === 403);
+
+  const adminDecider = await api(adminToken, `/api/bookings/${bookingId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "accepted" }),
+  });
+  check("admin cannot accept a vendor request → 403", adminDecider.status === 403);
 
   const otherVendorDecider = await api(vendor2Token, `/api/bookings/${bookingId}`, {
     method: "PATCH",
@@ -341,6 +353,14 @@ async function main() {
   const allServices = await api(adminToken, "/api/admin/services");
   check("admin sees every service", allServices.body?.services?.length >= 8);
 
+  const pendingServices = await api(adminToken, "/api/admin/services?status=pending");
+  check(
+    "admin service status filter works server-side",
+    pendingServices.status === 200 &&
+      pendingServices.body.services.length > 0 &&
+      pendingServices.body.services.every((s) => s.status === "pending"),
+  );
+
   const approve = await api(adminToken, `/api/admin/services/${newService.body.service._id}`, {
     method: "PATCH",
     body: JSON.stringify({ action: "approve" }),
@@ -385,6 +405,28 @@ async function main() {
     ? (await api(adminToken, "/api/admin/users")).body.users
     : [];
   const vendorUser = vendorUsers.find((u) => u.email === "vendor@wedplan.test");
+
+  const userSearch = await api(
+    adminToken,
+    "/api/admin/users?search=vendor@wedplan.test&role=vendor",
+  );
+  check(
+    "admin user search and role filter work server-side",
+    userSearch.status === 200 &&
+      userSearch.body.users.length === 1 &&
+      userSearch.body.users[0].email === "vendor@wedplan.test",
+  );
+
+  const planGrant = await api(adminToken, `/api/admin/users/${vendorUser._id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ role: "vendor", subscriptionPlan: "premium" }),
+  });
+  check(
+    "admin user edit cannot grant premium → plan unchanged",
+    planGrant.body?.user?.subscriptionPlan === "free",
+    `(got ${planGrant.body?.user?.subscriptionPlan})`,
+  );
+
   const blockedFlip = await api(adminToken, `/api/admin/users/${vendorUser._id}`, {
     method: "PATCH",
     body: JSON.stringify({ isBlocked: true }),
@@ -407,6 +449,12 @@ async function main() {
 
   const txList = await api(adminToken, "/api/admin/transactions");
   check("admin can list transactions", txList.status === 200);
+  check(
+    "transactions include vendor identity fields",
+    txList.body.transactions.length === 0 ||
+      ("vendorName" in txList.body.transactions[0] &&
+        "vendorId" in txList.body.transactions[0]),
+  );
 
   const vendorTx = await api(vendorToken, "/api/admin/transactions");
   check("vendor cannot view transactions → 403", vendorTx.status === 403);
@@ -418,7 +466,13 @@ async function main() {
   );
 
   console.log("\n7. Unconfigured integrations degrade cleanly");
-  const checkout = await api(customerToken, "/api/payments/checkout", {
+  const customerCheckout = await api(customerToken, "/api/payments/checkout", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  check("customer cannot open premium checkout → 403", customerCheckout.status === 403);
+
+  const checkout = await api(vendorToken, "/api/payments/checkout", {
     method: "POST",
     body: JSON.stringify({}),
   });
