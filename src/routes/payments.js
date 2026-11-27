@@ -194,10 +194,21 @@ export async function stripeWebhook(req, res, next) {
       );
     }
 
+    // Local Express uses express.raw(); the Vercel handler can also hand us a
+    // string. Either way Stripe must receive the exact bytes it signed.
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body
+      : typeof req.body === "string"
+        ? Buffer.from(req.body)
+        : null;
+    if (!rawBody) {
+      throw new ApiError(400, "Webhook body could not be read as raw bytes.");
+    }
+
     let event;
     try {
       event = stripe().constructEvent(
-        req.body, // Buffer from express.raw()
+        rawBody,
         req.headers["stripe-signature"],
         env.stripeWebhookSecret,
       );
