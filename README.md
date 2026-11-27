@@ -6,15 +6,18 @@ booking lifecycle, Stripe premium subscriptions, and ImgBB image uploads — and
 serves the separate Next.js client (`wedplan-client`).
 
 - **Client repository:** <https://github.com/Gourbera-sudo/wed-plan-client.git>
-- **Live client:** add the deployed URL here after deployment. The API must be
-  reachable at `<API_URL>/api/health` with `CLIENT_URL` set to the client origin.
+- **Live client:** <https://wedplan-client-brown.vercel.app>
+- **Live API:** <https://wedplan-server-teal.vercel.app> · health check:
+  <https://wedplan-server-teal.vercel.app/api/health>. `CLIENT_URL` is set to the
+  live client origin.
 
 ## Features
 
-- **JWT authentication bridge** — Better Auth signs users in on the client; this
-  server verifies the signed session cookie (`BETTER_AUTH_SECRET`) and mints
-  short-lived API JWTs (`POST /api/auth/token`). Every protected route requires
-  `Authorization: Bearer <token>`.
+- **JWT authentication bridge** — Better Auth signs users in on the client
+  domain; the client's same-origin `/api/auth/token` route reads that session and
+  signs a short-lived HS256 JWT with the shared `JWT_SECRET`. Every protected
+  API route verifies `Authorization: Bearer <token>` against that secret, so
+  cross-domain hosting works without shipping cookies to the API.
 - **Role-based authorization** — `customer`, `vendor`, `admin` roles verified
   server-side on every protected endpoint (`403` otherwise). Blocked users are
   locked out immediately, whatever their role. Admin can never be assigned
@@ -51,8 +54,8 @@ serves the separate Next.js client (`wedplan-client`).
 - **Runtime:** Node.js (ES modules), Express 5
 - **Database:** MongoDB (`mongodb` driver) — database `wed-plan`, shared with
   the client's Better Auth collections (`user`, `session`, `account`)
-- **Auth:** JWT (`jsonwebtoken`) + HMAC verification of Better Auth session
-  cookies; password hashing compatible with Better Auth (`@better-auth/utils`)
+- **Auth:** JWT (`jsonwebtoken`) verified with the shared `JWT_SECRET`; password
+  hashing compatible with Better Auth (`@better-auth/utils`)
 - **Payments:** Stripe Checkout (`stripe`)
 - **Images:** ImgBB REST API
 - **Testing:** `scripts/smoke-test.mjs` — 62 end-to-end checks that sign in
@@ -158,7 +161,7 @@ With the server **and** the client (`wedplan-client`, port 3000) running:
 
 ```bash
 node scripts/smoke-test.mjs
-# 54 passed, 0 failed
+# 62 passed, 0 failed
 ```
 
 If you have bookings created by the old client-side server action, normalize them
@@ -170,6 +173,18 @@ node scripts/migrate-bookings.mjs
 
 It converts string IDs and capitalized statuses to the current schema and fills
 missing denormalized display fields. It is safe to re-run.
+
+### 6. Deploy
+
+The live API is a Vercel project (`wedplan-server`) with `vercel.json` routing
+every request through `api/index.js`, where the Express app is cached between
+invocations and Stripe's raw webhook body is preserved. Deployment Protection is
+disabled so public routes are reachable without Vercel SSO. Production env vars
+include the shared MongoDB URI, `JWT_SECRET`, `BETTER_AUTH_SECRET`,
+`CLIENT_URL=https://wedplan-client-brown.vercel.app`, and UPI settings. Stripe
+and ImgBB keys are not part of this demo deployment; their endpoints return a
+clear `503` until configured. Redeploy with `vercel --prod`, then confirm
+`/api/health` and `/api/services` respond publicly.
 
 ## Project structure
 
@@ -191,7 +206,7 @@ src/
   app.js               Express app, CORS, route table
 scripts/
   seed.js              repeatable demo seed
-  smoke-test.mjs       54-check end-to-end suite
+  smoke-test.mjs       62-check end-to-end suite
   migrate-bookings.mjs one-time legacy booking normalization
 ```
 
@@ -199,5 +214,4 @@ scripts/
 
 - **Client:** <https://github.com/Gourbera-sudo/wed-plan-client.git> — Next.js 16
   (App Router) UI, Better Auth sign-in, role dashboards.
-- **Live client:** record the deployed URL at the top of this README once the
-  client is published.
+- **Live client:** <https://wedplan-client-brown.vercel.app>
