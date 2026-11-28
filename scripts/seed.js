@@ -33,7 +33,14 @@ if (!uri) {
 const image = (id) =>
   `https://images.unsplash.com/${id}?auto=format&fit=crop&w=1200&q=80`;
 
-const DEMO_PASSWORD = "Wedplan1!"; // 6+ chars, upper + lower + symbol
+// Configurable in .env; matches the client auth password rule.
+const DEMO_PASSWORD = process.env.ADMIN_PASSWORD || "Wedplan1!";
+if (!/^(?=.*[a-z])(?=.*[A-Z]).{6,}$/.test(DEMO_PASSWORD)) {
+  console.error(
+    "ADMIN_PASSWORD in .env must be 6+ characters with one uppercase and one lowercase letter.",
+  );
+  process.exit(1);
+}
 
 const users = [
   {

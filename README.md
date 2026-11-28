@@ -98,6 +98,7 @@ cp .env.example .env   # never commit .env — it is git-ignored
 | `PORT` | — | default `8000` |
 | `CLIENT_URL` | — | Next.js origin for CORS + Stripe redirects, default `http://localhost:3000` |
 | `JWT_EXPIRES_IN` | — | API token lifetime, default `1h` |
+| `ADMIN_PASSWORD` | — | Password applied to seeded demo accounts (including admin) by `scripts/seed.js`, default `Wedplan1!`; must be 6+ chars with upper and lower |
 | `STRIPE_SECRET_KEY` | for payments | Stripe secret key (test mode ok) |
 | `STRIPE_WEBHOOK_SECRET` | for payments | webhook signing secret (raw-body verification) |
 | `UPI_VPA` | for UPI | payee UPI ID shown on the QR/deep link; empty disables UPI |
@@ -111,7 +112,7 @@ cp .env.example .env   # never commit .env — it is git-ignored
 node scripts/seed.js
 ```
 
-Repeatable and idempotent — resets demo users and services (and removes legacy client-seeded rows). Demo sign-ins (password `Wedplan1!`):
+Repeatable and idempotent — resets demo users and services (and removes legacy client-seeded rows). The password comes from `ADMIN_PASSWORD` in `.env` (default `Wedplan1!`); re-run the seed after changing it. Demo sign-ins:
 
 | Role | Email | Notes |
 | --- | --- | --- |

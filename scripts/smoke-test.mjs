@@ -9,7 +9,7 @@
  */
 const API = process.env.API_URL || "http://localhost:8000";
 const CLIENT = process.env.CLIENT_URL || "http://localhost:3000";
-const PASSWORD = "Wedplan1!";
+const PASSWORD = process.env.ADMIN_PASSWORD || "Wedplan1!";
 const TEST_EVENT_DATE = "2027-06-15";
 
 import "dotenv/config";
