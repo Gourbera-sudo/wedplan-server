@@ -1,67 +1,42 @@
-# wedplan-server
+# WedPlan Server — REST API
 
-Express + MongoDB REST API for **WedPlan**, a wedding-planning platform. It owns
-all data and business rules — role-based access control, service moderation,
-booking lifecycle, Stripe premium subscriptions, and ImgBB image uploads — and
-serves the separate Next.js client (`wedplan-client`).
+## Project Name and Description
+
+**Project name:** WedPlan Server — REST API. Express + MongoDB REST API for **WedPlan**, a wedding-planning platform. It owns all data and business rules — role-based access control, service moderation, booking lifecycle, Stripe premium subscriptions, and ImgBB image uploads — and serves the separate Next.js client.
+
+## Live Website Link
+
+- **Client:** <https://wedplan-client-brown.vercel.app>
+- **API:** <https://wedplan-server-teal.vercel.app>
+- **API health check:** <https://wedplan-server-teal.vercel.app/api/health>
+
+## Client and Server Repository Links
 
 - **Client repository:** <https://github.com/Gourbera-sudo/wed-plan-client.git>
-- **Live client:** <https://wedplan-client-brown.vercel.app>
-- **Live API:** <https://wedplan-server-teal.vercel.app> · health check:
-  <https://wedplan-server-teal.vercel.app/api/health>. `CLIENT_URL` is set to the
-  live client origin.
+- **Server repository:** <https://github.com/Gourbera-sudo/wedplan-server.git> — this repository.
 
-## Features
+## Important Features
 
-- **JWT authentication bridge** — Better Auth signs users in on the client
-  domain; the client's same-origin `/api/auth/token` route reads that session and
-  signs a short-lived HS256 JWT with the shared `JWT_SECRET`. Every protected
-  API route verifies `Authorization: Bearer <token>` against that secret, so
-  cross-domain hosting works without shipping cookies to the API.
-- **Role-based authorization** — `customer`, `vendor`, `admin` roles verified
-  server-side on every protected endpoint (`403` otherwise). Blocked users are
-  locked out immediately, whatever their role. Admin can never be assigned
-  through the API.
-- **Services** — public browse with search (name/description/vendor), category
-  and location filters, and price sort ascending/descending. Vendor CRUD with a
-  3-active-listing cap on the free plan; new listings start `pending` and are
-  hidden until an admin approves them.
-- **Bookings** — customers request bookings; no self-booking, no duplicates per
-  service + event date, and only `pending` requests can be accepted, rejected,
-  or cancelled (each by the right party).
-- **Admin** — user management (server-side search/role filters, detail view,
-  block/unblock, role and business-name changes short of admin — no plan grants),
-  service moderation with server-side filters (approve/reject/pause/delete),
-  stats, and a transaction ledger with vendor identity and UPI verification.
-- **Stripe premium** — `POST /api/payments/checkout` is vendor-only and creates a
-  Checkout session; the **raw-body webhook** (`/api/payments/webhook`,
-  signature-verified) is the trusted event that activates premium (30 days) and
-  writes the transaction. Redeliveries are idempotent; refunds, disputes, and
-  cancellations revoke premium. The client success redirect never trusts itself,
-  and expired premium automatically falls back to the free-plan limit.
-- **UPI premium** — `POST /api/payments/upi/create` returns a QR/deep link and
-  pending reference; `POST /api/payments/upi/submit` records the vendor's UTR.
-  Premium activates only through the admin-only
-  `PATCH /api/admin/transactions/:ref/verify`; polling and redirects never
-  change the plan.
+- **JWT authentication bridge** — Better Auth signs users in on the client domain; the client's same-origin `/api/auth/token` route reads that session and signs a short-lived HS256 JWT with the shared `JWT_SECRET`. Every protected API route verifies `Authorization: Bearer <token>` against that secret, so cross-domain hosting works without shipping cookies to the API.
+- **Role-based authorization** — `customer`, `vendor`, `admin` roles verified server-side on every protected endpoint (`403` otherwise). Blocked users are locked out immediately, whatever their role. Admin can never be assigned through the API.
+- **Services** — public browse with search (name/description/vendor), category and location filters, and price sort ascending/descending. Vendor CRUD with a 3-active-listing cap on the free plan; new listings start `pending` and are hidden until an admin approves them.
+- **Bookings** — customers request bookings; no self-booking, no duplicates per service + event date, and only `pending` requests can be accepted, rejected, or cancelled (each by the right party).
+- **Admin** — user management (server-side search/role filters, detail view, block/unblock, role and business-name changes short of admin — no plan grants), service moderation with server-side filters (approve/reject/pause/delete), stats, and a transaction ledger with vendor identity and UPI verification.
+- **Stripe premium** — `POST /api/payments/checkout` is vendor-only and creates a Checkout session; the **raw-body webhook** (`/api/payments/webhook`, signature-verified) is the trusted event that activates premium (30 days) and writes the transaction. Redeliveries are idempotent; refunds, disputes, and cancellations revoke premium. The client success redirect never trusts itself, and expired premium automatically falls back to the free-plan limit.
+- **UPI premium** — `POST /api/payments/upi/create` returns a QR/deep link and pending reference; `POST /api/payments/upi/submit` records the vendor's UTR. Premium activates only through the admin-only `PATCH /api/admin/transactions/:ref/verify`; polling and redirects never change the plan.
 - **ImgBB uploads** — `POST /api/profile/image` for profile pictures.
-- **Graceful degradation** — with `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-  `UPI_VPA`, or `IMGBB_API_KEY` missing, the related endpoints return a clear
-  `503` explaining which env var to set instead of crashing.
+- **Graceful degradation** — with `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `UPI_VPA`, or `IMGBB_API_KEY` missing, the related endpoints return a clear `503` explaining which env var to set instead of crashing.
 
-## Tech stack
+## Technology Stack
 
 - **Runtime:** Node.js (ES modules), Express 5
-- **Database:** MongoDB (`mongodb` driver) — database `wed-plan`, shared with
-  the client's Better Auth collections (`user`, `session`, `account`)
-- **Auth:** JWT (`jsonwebtoken`) verified with the shared `JWT_SECRET`; password
-  hashing compatible with Better Auth (`@better-auth/utils`)
+- **Database:** MongoDB (`mongodb` driver) — database `wed-plan`, shared with the client's Better Auth collections (`user`, `session`, `account`)
+- **Auth:** JWT (`jsonwebtoken`) verified with the shared `JWT_SECRET`; password hashing compatible with Better Auth (`@better-auth/utils`)
 - **Payments:** Stripe Checkout (`stripe`)
 - **Images:** ImgBB REST API
-- **Testing:** `scripts/smoke-test.mjs` — 62 end-to-end checks that sign in
-  through the real client and assert every business rule
+- **Testing:** `scripts/smoke-test.mjs` — 62 end-to-end checks that sign in through the real client and assert every business rule
 
-## API overview
+## API Overview
 
 | Method | Path | Access | Purpose |
 | --- | --- | --- | --- |
@@ -95,15 +70,16 @@ serves the separate Next.js client (`wedplan-client`).
 | GET | `/api/admin/transactions` | admin | full ledger |
 | PATCH | `/api/admin/transactions/:ref/verify` | admin | `approve` / `reject` a UPI payment — the trusted activation event |
 
-All error responses are `{ "error": "<message>" }` with proper `401`/`403`/`404`/
-`409`/`503` status codes.
+All error responses are `{ "error": "<message>" }` with proper `401`/`403`/`404`/`409`/`503` status codes.
 
-## Getting started
+## Installation Instructions
 
-### 1. Install
+Requires Node.js 20+ and a MongoDB connection (local or Atlas).
+
+### 1. Clone and install dependencies
 
 ```bash
-git clone <repo-url> wedplan-server
+git clone https://github.com/Gourbera-sudo/wedplan-server.git wedplan-server
 cd wedplan-server
 npm install
 ```
@@ -111,10 +87,8 @@ npm install
 ### 2. Configure environment
 
 ```bash
-cp .env.example .env
+cp .env.example .env   # never commit .env — it is git-ignored
 ```
-
-Fill in `.env` (never commit it — it is git-ignored):
 
 | Variable | Required | Description |
 | --- | --- | --- |
@@ -137,8 +111,7 @@ Fill in `.env` (never commit it — it is git-ignored):
 node scripts/seed.js
 ```
 
-Repeatable and idempotent — resets demo users and services (and removes legacy
-client-seeded rows). Demo sign-ins (password `Wedplan1!`):
+Repeatable and idempotent — resets demo users and services (and removes legacy client-seeded rows). Demo sign-ins (password `Wedplan1!`):
 
 | Role | Email | Notes |
 | --- | --- | --- |
@@ -148,48 +121,49 @@ client-seeded rows). Demo sign-ins (password `Wedplan1!`):
 | customer | `customer@wedplan.test` | |
 | blocked | `blocked@wedplan.test` | blocked account — sign-in refused |
 
-### 4. Run
+## How to Run the Project Locally
+
+Start the API from this repository:
 
 ```bash
-node index.js        # or: npm start
+cd wedplan-server
+npm start               # or: node index.js
 # wedplan-server listening on http://localhost:8000
 ```
 
-### 5. Verify
-
-With the server **and** the client (`wedplan-client`, port 3000) running:
+Then start the client from the sibling repository in a second terminal:
 
 ```bash
-node scripts/smoke-test.mjs
+cd ../wedplan-client
+npm run dev             # http://localhost:3000
+```
+
+Verify the full stack with the smoke suite while both processes are running:
+
+```bash
+cd ../wedplan-server
+npm test
 # 62 passed, 0 failed
 ```
 
-If you have bookings created by the old client-side server action, normalize them
-once before running the suite:
+If you have bookings created by the old client-side server action, normalize them once before running the suite:
 
 ```bash
 node scripts/migrate-bookings.mjs
 ```
 
-It converts string IDs and capitalized statuses to the current schema and fills
-missing denormalized display fields. It is safe to re-run.
+It converts string IDs and capitalized statuses to the current schema and fills missing denormalized display fields. It is safe to re-run.
 
-### 6. Deploy
+## Deployment
 
-The live API is a Vercel project (`wedplan-server`) with `vercel.json` routing
-every request through `api/index.js`, where the Express app is cached between
-invocations and Stripe's raw webhook body is preserved. Deployment Protection is
-disabled so public routes are reachable without Vercel SSO. Production env vars
-include the shared MongoDB URI, `JWT_SECRET`, `BETTER_AUTH_SECRET`,
-`CLIENT_URL=https://wedplan-client-brown.vercel.app`, and UPI settings. Stripe
-and ImgBB keys are not part of this demo deployment; their endpoints return a
-clear `503` until configured. Redeploy with `vercel --prod`, then confirm
-`/api/health` and `/api/services` respond publicly.
+The live API is a Vercel project (`wedplan-server`) with `vercel.json` routing every request through `api/index.js`, where the Express app is cached between invocations and Stripe's raw webhook body is preserved. Deployment Protection is disabled so public routes are reachable without Vercel SSO. Production env vars include the shared MongoDB URI, `JWT_SECRET`, `BETTER_AUTH_SECRET`, `CLIENT_URL=https://wedplan-client-brown.vercel.app`, and UPI settings. Stripe and ImgBB keys are not part of this demo deployment; their endpoints return a clear `503` until configured. Redeploy with `vercel --prod`, then confirm `/api/health` and `/api/services` respond publicly.
 
-## Project structure
+## Project Structure
 
 ```
 index.js               entry — env check, DB connect, listen
+api/index.js           Vercel serverless handler (cached Express app)
+vercel.json            Vercel builds, routes, and iad1 function region
 src/
   config/env.js        env loading + required-variable guard
   config/db.js         Mongo connection + indexes
@@ -209,9 +183,3 @@ scripts/
   smoke-test.mjs       62-check end-to-end suite
   migrate-bookings.mjs one-time legacy booking normalization
 ```
-
-## Related repositories
-
-- **Client:** <https://github.com/Gourbera-sudo/wed-plan-client.git> — Next.js 16
-  (App Router) UI, Better Auth sign-in, role dashboards.
-- **Live client:** <https://wedplan-client-brown.vercel.app>
